@@ -134,7 +134,11 @@ func (c *RedisStore) MSetNX(expires time.Duration, kv ...interface{}) error {
 func (c *RedisStore) Add(key string, value interface{}, expires time.Duration) error {
 	conn := c.pool.Get()
 	defer conn.Close()
-	if exists(conn, key) {
+	exists, err := exists(conn, key)
+	if err != nil {
+		return err
+	}
+	if exists {
 		return ErrNotStored
 	}
 	return c.invoke(conn.Do, key, value, expires)
@@ -144,7 +148,10 @@ func (c *RedisStore) Add(key string, value interface{}, expires time.Duration) e
 func (c *RedisStore) Replace(key string, value interface{}, expires time.Duration) error {
 	conn := c.pool.Get()
 	defer conn.Close()
-	if !exists(conn, key) {
+	if exists, err := exists(conn, key); !exists {
+		if err != nil {
+			return err
+		}
 		return ErrNotStored
 	}
 	err := c.invoke(conn.Do, key, value, expires)
@@ -203,16 +210,19 @@ func (c *RedisStore) Mget(ptrValue []interface{}, keys ...string) error {
 	return nil
 }
 
-func exists(conn redis.Conn, key string) bool {
-	retval, _ := redis.Bool(conn.Do("EXISTS", key))
-	return retval
+func exists(conn redis.Conn, key string) (bool, error) {
+	retval, err := redis.Bool(conn.Do("EXISTS", key))
+	return retval, err
 }
 
 // Delete (see CacheStore interface)
 func (c *RedisStore) Delete(key string) error {
 	conn := c.pool.Get()
 	defer conn.Close()
-	if !exists(conn, key) {
+	if exists, err := exists(conn, key); !exists {
+		if err != nil {
+			return err
+		}
 		return ErrCacheMiss
 	}
 	_, err := conn.Do("DEL", key)
@@ -329,7 +339,10 @@ func (c *RedisStore) Decrement(key string, delta uint64) (newValue uint64, err e
 	defer conn.Close()
 	// Check for existance *before* increment as per the cache contract.
 	// redis will auto create the key, and we don't want that, hence the exists call
-	if !exists(conn, key) {
+	if exists, err := exists(conn, key); !exists {
+		if err != nil {
+			return 0, err
+		}
 		return 0, ErrCacheMiss
 	}
 	// Decrement contract says you can only go to 0
