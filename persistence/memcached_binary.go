@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/Bose/cache/utils"
-	// "github.com/gin-contrib/cache/utils"
 	"github.com/memcachier/mc"
 )
 
