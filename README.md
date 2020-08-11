@@ -7,6 +7,8 @@
 
 Gin middleware/handler to enable Cache.
 
+Please see CODE_OF_CONDUCT for contribution guidelines.
+
 ## Usage
 
 ### Start using it
