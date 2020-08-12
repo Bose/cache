@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Jim-Lambert-Bose/cache/persistence"
-	"github.com/Jim-Lambert-Bose/cache"
-	// "github.com/gin-contrib/cache"
-	// "github.com/gin-contrib/cache/persistence"
+	"github.com/Bose/cache"
+	"github.com/Bose/cache/persistence"
 	"github.com/gin-gonic/gin"
 )
 

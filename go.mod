@@ -1,4 +1,4 @@
-module github.com/Jim-Lambert-Bose/cache
+module github.com/Bose/cache
 
 require (
 	github.com/bradfitz/gomemcache v0.0.0-20190329173943-551aad21a668

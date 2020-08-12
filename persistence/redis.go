@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	//"github.com/gin-contrib/cache/utils"
 	"time"
 
-	"github.com/Jim-Lambert-Bose/cache/utils"
+	"github.com/Bose/cache/utils"
 	"github.com/gomodule/redigo/redis"
 )
 
