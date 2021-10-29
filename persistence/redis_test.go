@@ -273,6 +273,12 @@ func TestRedisCache_HSET_HGET_HGETALL(t *testing.T) {
 	if getAllHash.Field3 != a {
 		t.Errorf("Expected a struct with values %v", getAllHash.Field3)
 	}
+
+	getAllHash2 := rHash{}
+	err = store.HGetAll("notthere", &getAllHash2)
+	if err != ErrCacheMiss {
+		t.Errorf("Expected a cache miss of non existant key for getall got: %v", err)
+	}
 }
 
 func TestRedisCache_HEXISTS_HDEL(t *testing.T) {

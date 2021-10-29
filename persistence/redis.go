@@ -447,7 +447,7 @@ func (c *RedisStore) HGetAll(key string, structPtr interface{})  error {
 
 	raw, err := redis.Values(conn.Do("HGETALL", key))
 	if err != nil { return fmt.Errorf("HGETALL error: %v", err) }
-	if raw == nil { return ErrCacheMiss }
+	if raw == nil || len(raw) == 0 { return ErrCacheMiss }
 
 	l := len(raw)
 	if l%2 != 0 {
