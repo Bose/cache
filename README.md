@@ -1,4 +1,4 @@
-# Cache gin's middleware
+# Cache gin's middleware - ARCHIVED
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Bose/cache)](https://goreportcard.com/report/github.com/Bose/cache)
 [![GoDoc](https://godoc.org/github.com/Bose/cache?status.svg)](https://godoc.org/github.com/Bose/cache)
