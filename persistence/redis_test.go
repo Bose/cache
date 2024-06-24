@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"encoding/gob"
 	"net"
 	"testing"
 	"time"
@@ -211,5 +212,229 @@ func msetNXThenMgetThreeKeys(t *testing.T, newCache cacheFactory) {
 	}
 	if r3 != v3 {
 		t.Errorf("Expected to get %v for key %v, got %v", v3, k3, r3)
+	}
+}
+
+// Redis Hash Sets
+type aType struct {
+	Count int
+	Str string
+}
+func init() {
+	gob.Register(aType{})
+}
+type rHash struct {
+	Field1 int
+	Field2 string
+	Field3 aType
+	field4 string
+}
+
+func TestRedisCache_HSET_HGET_HGETALL(t *testing.T) {
+	var err error
+	exp := time.Duration(5)*time.Second
+	store := newRawRedisStore(t, exp)
+
+	testData := rHash{
+		Field1: 19,
+		Field2: "f2 value",
+		Field3: aType{Count: 1,Str: "hi"},
+		field4: "unexported",
+	}
+	numFieldsCreated, err := store.HSet("hset1", exp, &testData)
+	if err != nil {
+		t.Errorf("Expected no error for Hset: %v", err)
+	}
+	if numFieldsCreated != 3 {
+		t.Errorf("Expected 3 fields created, got %v", numFieldsCreated)
+	}
+
+	var intValue int
+	err = store.HGet("hset1", "Field1", &intValue)
+	if err != nil {
+		t.Errorf("Failed to get a field hset1:Field1: %v", err)
+	}
+	if intValue != 19 {
+		t.Errorf("Get Value: %v doesn't match what was set", intValue)
+	}
+
+	getAllHash := rHash{}
+	err = store.HGetAll("hset1", &getAllHash)
+	if err != nil {
+		t.Errorf("Failed to get all fields for key: hset1: %v", err)
+	}
+	if getAllHash.Field1 != 19 {
+		t.Errorf("Expected 19 got %v", getAllHash.Field1)
+	}
+	if getAllHash.Field2 != "f2 value" {
+		t.Errorf("Expected f2 value got %v", getAllHash.Field2)
+	}
+	a := aType{Count: 1,Str: "hi"}
+	if getAllHash.Field3 != a {
+		t.Errorf("Expected a struct with values %v", getAllHash.Field3)
+	}
+
+	getAllHash2 := rHash{}
+	err = store.HGetAll("notthere", &getAllHash2)
+	if err != ErrCacheMiss {
+		t.Errorf("Expected a cache miss of non existant key for getall got: %v", err)
+	}
+}
+
+func TestRedisCache_HEXISTS_HDEL(t *testing.T) {
+	var err error
+	exp := time.Duration(5)*time.Second
+	store := newRawRedisStore(t, exp)
+
+	testData := rHash{
+		Field1: 19,
+		Field2: "f2 value",
+		Field3: aType{Count: 1,Str: "hi"},
+		field4: "unexported",
+	}
+	numFieldsCreated, err := store.HSet("hset2", exp, &testData)
+	if err != nil {
+		t.Errorf("Expected no error for Hset: %v", err)
+	}
+	if numFieldsCreated != 3 {
+		t.Errorf("Expected 3 fields created, got %v", numFieldsCreated)
+	}
+
+	f1Exists, err := store.HExists("hset2", "Field1")
+	if err != nil {
+		t.Errorf("Expected no error from hexists: %v", err)
+	}
+	if !f1Exists {
+		t.Errorf("Field1 Expected to exist")
+	}
+	numDel, err := store.HDel("hset2", "Field1", "Field2", "NotAField")
+	if err != nil {
+		t.Errorf("Expected no error from hdel: %v", err)
+	}
+	if numDel != 2 {
+		t.Errorf("Hdel had incorrect number deleted: %v", err)
+	}
+	f1Exists, err = store.HExists("hset2", "Field1")
+	if err != nil {
+		t.Errorf("Expected no error from hexists: %v", err)
+	}
+	if f1Exists {
+		t.Errorf("Field1 Expected to have been deleted")
+	}
+}
+
+func TestRedisCache_HKEYS(t *testing.T) {
+	var err error
+	exp := time.Duration(5)*time.Second
+	store := newRawRedisStore(t, exp)
+
+	testData := rHash{
+		Field1: 19,
+		Field2: "f2 value",
+		Field3: aType{Count: 1,Str: "hi"},
+		field4: "unexported",
+	}
+	numFieldsCreated, err := store.HSet("hset3", exp, &testData)
+	if err != nil {
+		t.Errorf("Expected no error for Hset: %v", err)
+	}
+	if numFieldsCreated != 3 {
+		t.Errorf("Expected 3 fields created, got %v", numFieldsCreated)
+	}
+
+	fieldNames, err := store.HKeys("hset3")
+	if err != nil {
+		t.Errorf("expected hkeys to succeed: %v", err)
+	}
+	if len(fieldNames) != 3 {
+		t.Errorf("Expected 3 fields, got: %v", len(fieldNames))
+	}
+	for _, field := range fieldNames {
+		if !stringInSlice(field, []string{"Field1", "Field2", "Field3"}) {
+			t.Errorf("Found field shouldn't exist: %s", field)
+		}
+	}
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRedisCache_HLEN(t *testing.T) {
+	var err error
+	exp := time.Duration(5)*time.Second
+	store := newRawRedisStore(t, exp)
+
+	testData := rHash{
+		Field1: 19,
+		Field2: "f2 value",
+		Field3: aType{Count: 1,Str: "hi"},
+		field4: "unexported",
+	}
+	numFieldsCreated, err := store.HSet("hset4", exp, &testData)
+	if err != nil {
+		t.Errorf("Expected no error for Hset: %v", err)
+	}
+	if numFieldsCreated != 3 {
+		t.Errorf("Expected 3 fields created, got %v", numFieldsCreated)
+	}
+
+	hLen, err := store.HLen("hset4")
+	if err != nil {
+		t.Errorf("expected hlen to succeed: %v", err)
+	}
+	if hLen != 3 {
+		t.Errorf("Expected hlen to be 3, got: %v", hLen)
+	}
+}
+
+func TestRedisCache_HINCRBY(t *testing.T) {
+	var err error
+	exp := time.Duration(5)*time.Second
+	store := newRawRedisStore(t, exp)
+
+	testData := rHash{
+		Field1: 19,
+		Field2: "f2 value",
+		Field3: aType{Count: 1,Str: "hi"},
+		field4: "unexported",
+	}
+	numFieldsCreated, err := store.HSet("hset5", exp, &testData)
+	if err != nil {
+		t.Errorf("Expected no error for Hset: %v", err)
+	}
+	if numFieldsCreated != 3 {
+		t.Errorf("Expected 3 fields created, got %v", numFieldsCreated)
+	}
+
+	var intValue int
+	err = store.HGet("hset5", "Field1", &intValue)
+	if err != nil {
+		t.Errorf("Failed to get a field hset5:Field1: %v", err)
+	}
+	if intValue != 19 {
+		t.Errorf("Get Value: %v doesn't match what was set", intValue)
+	}
+
+	nVal, err := store.HIncrBy("hset5", "Field1", 1)
+	if err != nil {
+		t.Errorf("Expected no error for Hincrby: %v", err)
+	}
+	if nVal != 20 {
+		t.Errorf("Increment by 1 should be 20 got: %v", nVal)
+	}
+
+	var nintValue int
+	err = store.HGet("hset5", "Field1", &nintValue)
+	if err != nil {
+		t.Errorf("Failed to get a field hset5:Field1: %v", err)
+	}
+	if nintValue != 20 {
+		t.Errorf("Get Value: %v doesn't match what was incremented", nintValue)
 	}
 }

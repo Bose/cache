@@ -3,11 +3,11 @@ package persistence
 import (
 	"errors"
 	"fmt"
-
 	"time"
 
-	"github.com/Bose/cache/utils"
 	"github.com/gomodule/redigo/redis"
+
+	"github.com/Bose/cache/utils"
 )
 
 var (
@@ -362,6 +362,175 @@ func (c *RedisStore) Flush() error {
 	defer conn.Close()
 	_, err := conn.Do("FLUSHALL")
 	return err
+}
+
+// HSet Sets field in the hash stored at key to value. If key does not exist, a new key holding a hash is created.
+// If field already exists in the hash, it is overwritten.
+// Requires a pointer to a struct that has exported fields to set as the redis fields. Ignores unexported fields, and
+// returns an error if any fields are failed to be Serialized. Custom types in the struct will require gob.Register of
+// the type for Serialization/Deserialization to work.
+func (c *RedisStore) HSet(key string, expires time.Duration, structPtr interface{})  (int64, error) {
+	serializedArgs := []interface{}{key} // set the key for the hash as the first argument
+
+	args, err := utils.StructToSerializedArgs(structPtr)
+	if err != nil {
+		return 0, err
+	}
+	serializedArgs = append(serializedArgs, args...)
+
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	ex := c.translateExpire(expires)
+
+	// if an expiration time is set, run as a transaction to group the set and expires commands
+	if ex > 0 {
+		if err := conn.Send("MULTI"); err != nil {
+			return 0, err
+		}
+		if err := conn.Send("HSET", serializedArgs...); err != nil {
+			return 0, err
+		}
+		if err := conn.Send("EXPIRE", key, ex); err != nil {
+			return 0, err
+		}
+		transactionResponse, err := redis.Values(conn.Do("EXEC"))
+		if err != nil {
+			return 0, err
+		}
+		setResponse, err := redis.Int64(transactionResponse[0], err)
+		if err != nil {
+			return 0, err
+		}
+		return setResponse, err
+	} else {
+		numFieldsAdded, err := redis.Int64(conn.Do("HSET", serializedArgs...))
+		return numFieldsAdded, err
+	}
+}
+
+// HExists Returns if field is an existing field in the hash stored at key. 1 if hash contains the field, 0 if not or
+// key doesn't exist
+func (c *RedisStore) HExists(key string, field string) (bool, error) {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	exists, err := redis.Bool(conn.Do("HEXISTS", key, field))
+	return exists, err
+}
+
+// HGet Returns the value associated with field in the hash stored at key
+func (c *RedisStore) HGet(key string, field string, ptrValue interface{})  error {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	raw, err := conn.Do("HGET", key, field)
+	if raw == nil {
+		return ErrCacheMiss
+	}
+	item, err := redis.Bytes(raw, err)
+	if err != nil {
+		return err
+	}
+	return utils.Deserialize(item, ptrValue)
+}
+
+// HGetAll Returns all fields and values of the hash stored at key. In the returned value, every field name is followed
+// by its value, so the length of the reply is twice the size of the hash.
+// Requires a ptr to a struct that has exported fields that match the fields stored in the redis hash. Returns an error
+// if any field in redis can't be mapped or deserialized to a struct field.
+// Requires a pointer to a struct that has exported fields that match the fields stored in redis. If a field exists in
+// redis that doesn't have a corresponding field in the struct an error is returned.
+func (c *RedisStore) HGetAll(key string, structPtr interface{})  error {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	raw, err := redis.Values(conn.Do("HGETALL", key))
+	if err != nil { return fmt.Errorf("HGETALL error: %v", err) }
+	if raw == nil || len(raw) == 0 { return ErrCacheMiss }
+
+	l := len(raw)
+	if l%2 != 0 {
+		return fmt.Errorf("Got %v keys but %v values", l/2, l/2+1)
+	}
+	for i := 0; i < l; i += 2 {
+		fieldName, strErr := redis.String(raw[i], err)
+		if strErr != nil {
+			return fmt.Errorf("return hash field name not a string: %v", raw[i])
+		}
+		valueB, bErr := redis.Bytes(raw[i+1], err)
+		if bErr != nil {
+			return fmt.Errorf("return hash field value not a byte: %v", raw[i+1])
+		}
+
+		fPtr, err := utils.StructGetFieldPtr(structPtr, fieldName)
+		if err != nil {
+			fmt.Errorf("HGETALL error getting struct field ptr: %s", err.Error())
+		}
+
+		dsrlzErr := utils.Deserialize(valueB, fPtr)
+		if dsrlzErr != nil {
+			return fmt.Errorf("HGETALL Deserialize Error: %v", dsrlzErr)
+		}
+	}
+	return nil
+}
+
+// HKeys Returns all field names in the hash stored at key.
+func (c *RedisStore) HKeys(key string) ([]string, error) {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	fieldsResponse, err := redis.Values(conn.Do("HKEYS", key))
+	if err != nil {
+		return nil, err
+	}
+	var fields []string
+	for _, field := range fieldsResponse {
+		if fString, err := redis.String(field, err); err != nil {
+			return nil, fmt.Errorf("return hash field name not a string: %v", field)
+		} else {
+			fields = append(fields, fString)
+		}
+	}
+	return fields, err
+}
+
+// HLen Returns the number of fields contained in the hash stored at key, or 0 when the key doesn't exist
+func (c *RedisStore) HLen(key string)  (int64, error) {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	keyLen, err := redis.Int64(conn.Do("HLEN", key))
+	return keyLen, err
+}
+
+// HIncrBy increments the number stored at field in the hash stored at key by increment. If key does not exist, a new key
+// holding a hash is created. If field does not exist the value is set to 0 before the operation is performed.
+// Returns the value at field after the increment operation.
+// The range of values supported by HINCRBY is limited to 64 bit signed integers.
+func (c *RedisStore) HIncrBy(key string, field string, increment int64) (int64, error) {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	newValue, err := redis.Int64(conn.Do("HINCRBY", key, field, increment))
+	return newValue, err
+}
+
+// HDel Removes the specified fields from the hash stored at key. Specified fields that do not exist within this hash are
+// ignored. If key does not exist, it is treated as an empty hash and this command returns 0.
+// Returns the number of fields that were removed from the hash, not including specified but non existing fields.
+func (c *RedisStore) HDel(key string, fields ...string) (int64, error) {
+	conn := c.pool.Get()
+	defer conn.Close()
+
+	args := []interface{}{key}
+	for _, field := range fields {
+		args = append(args, field)
+	}
+
+	numDeleted, err := redis.Int64(conn.Do("HDEL", args...))
+	return numDeleted, err
 }
 
 func (c *RedisStore) invoke(f func(string, ...interface{}) (interface{}, error),
